@@ -10,6 +10,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/asn1"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -163,9 +164,46 @@ func New(modulePath, tokenLabel, pin, privateKeyLabel string) (ps *Key, err erro
 		tokenLabel: tokenLabel,
 		pin:        pin,
 	}
-	err = ps.setup(privateKeyLabel)
+
+	fmt.Println("FFF")
+	session, err := ps.openSession()
 	if err != nil {
 		return
+	}
+	fmt.Println("UUU")
+	expected, err := base64.StdEncoding.DecodeString("MIICmTCCAYOgAwIBAgIBATALBgkqhkiG9w0BAQswEjEQMA4GA1UEAwwHU1NIIGtleTAeFw0xNjA0MDEwMDM2MTVaFw0xNzA0MDEwMDM2MTVaMBIxEDAOBgNVBAMMB1NTSCBrZXkwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDTf0DIJFt9UMQhiC5/vdTEzQRZgPXr9kexwOf6PRw1JvRSfmABOr1xQLI99OTx7n+cfRxqkzktFKu+GYRZuYM3kl9M79GUiam8k3qpVMNOI69BNt50dS0rRUX8YtRpYxrWSl86LyR4KTbqAG6wb04iU8JAOqKi9c3p+ek9zbfZzNa2M0J1R/Xgs/A/3cqVO1B96xO4Yn1oPjfLxUs2ZVMEIz96bTvzqF8K5WkyID6Io4XwtKTbgWNV0lm4fHD3oshBrzzJhMNkWoi6+Tih8Fsh6LMqWEKaO0BmPbVW4hfAr0FQKtfP6faQIP83/9Mi+7Czl3e6aOeXHYPdNKJB1GdxAgMBAAEwCwYJKoZIhvcNAQELA4IBAQARxLmIp7wh43+ubzynD3UwpQ9b+6k2RYQ86Rbx/0SKiVo/iiRVZJIojoQxz5gV3OBSJEpAK3Lq0ilvx63BRzgsARS/wYfjxhc20bXQ94B9vAAB8L203VmpnZ/DFGfHNuTrTKdFyMz/4ZuifZVOevkcSxQk8Kqop0CYfP0QRhAoWWa8Pj4YVCDkFdqBbuvZskEJ2mEULxz0Rmfcxi2Css76cBkpYCS2r6gZptpZ68+EvGOCbsvPPQ+rRHhzVCzHaLX0cA+nC1lBpyWmLlJdJ+wy2Hxh9hwRM7GoaZJZ1kixMRKK1cx5p3u/ZDmX4F0plN+gPW/iWspTAvZeyBV8e8Sq")
+	if err != nil {
+		return
+	}
+	template := []*pkcs11.Attribute{
+		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_CERTIFICATE),
+		pkcs11.NewAttribute(pkcs11.CKA_VALUE, expected),
+	}
+	if err := module.FindObjectsInit(session, template); err != nil {
+		return nil, err
+	}
+	certHandles, _, err := module.FindObjects(session, 1024)
+	if err != nil {
+		return nil, err
+	}
+	if err = module.FindObjectsFinal(session); err != nil {
+		return nil, err
+	}
+	fmt.Println("RRR", len(certHandles))
+	for _, certHandle := range certHandles {
+		fmt.Println("YYY")
+		attrs, err := module.GetAttributeValue(session, certHandle, []*pkcs11.Attribute{
+			pkcs11.NewAttribute(pkcs11.CKA_VALUE, nil),
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(attrs) == 0 || len(attrs[0].Value) == 0 {
+			//return nil, fmt.Errorf("pkcs11: certificate %d is missing subject attribute", certHandle)
+			continue
+		}
+		fmt.Println(base64.StdEncoding.EncodeToString(attrs[0].Value))
+		//fmt.Println(string(attrs[0].Value))
 	}
 	return ps, nil
 }
@@ -472,7 +510,7 @@ func (ps *Key) openSession() (pkcs11.SessionHandle, error) {
 		// Note: Logged-in status is application-wide, not per session. But in
 		// practice it appears to be okay to login to a token multiple times with the same
 		// credentials.
-		if err = ps.module.Login(session, pkcs11.CKU_USER, ps.pin); err != nil {
+		/*if err = ps.module.Login(session, pkcs11.CKU_USER, ps.pin); err != nil {
 			if err == pkcs11.Error(pkcs11.CKR_USER_ALREADY_LOGGED_IN) {
 				// But if the token says we're already logged in, it's ok.
 				err = nil
@@ -481,6 +519,7 @@ func (ps *Key) openSession() (pkcs11.SessionHandle, error) {
 				return session, err
 			}
 		}
+		*/
 
 		return session, err
 	}
