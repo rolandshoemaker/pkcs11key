@@ -5,16 +5,16 @@
 package pkcs11key
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
+	"crypto/x509"
 	"encoding/asn1"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"sync"
 
 	"github.com/miekg/pkcs11"
@@ -148,7 +148,7 @@ func initialize(modulePath string) (ctx, error) {
 }
 
 // New instantiates a new handle to a PKCS #11-backed key.
-func New(modulePath, tokenLabel, pin, privateKeyLabel string) (ps *Key, err error) {
+func New(modulePath, tokenLabel, pin string, publicKey interface{}) (ps *Key, err error) {
 	module, err := initialize(modulePath)
 	if err != nil {
 		return
@@ -163,53 +163,60 @@ func New(modulePath, tokenLabel, pin, privateKeyLabel string) (ps *Key, err erro
 		module:     module,
 		tokenLabel: tokenLabel,
 		pin:        pin,
+		publicKey:  publicKey,
 	}
 
-	fmt.Println("FFF")
-	session, err := ps.openSession()
+	err = ps.setup(publicKey)
 	if err != nil {
 		return
-	}
-	fmt.Println("UUU")
-	//expected, err := base64.StdEncoding.DecodeString("MIICmTCCAYOgAwIBAgIBATALBgkqhkiG9w0BAQswEjEQMA4GA1UEAwwHU1NIIGtleTAeFw0xNjA0MDEwMDM2MTVaFw0xNzA0MDEwMDM2MTVaMBIxEDAOBgNVBAMMB1NTSCBrZXkwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDTf0DIJFt9UMQhiC5/vdTEzQRZgPXr9kexwOf6PRw1JvRSfmABOr1xQLI99OTx7n+cfRxqkzktFKu+GYRZuYM3kl9M79GUiam8k3qpVMNOI69BNt50dS0rRUX8YtRpYxrWSl86LyR4KTbqAG6wb04iU8JAOqKi9c3p+ek9zbfZzNa2M0J1R/Xgs/A/3cqVO1B96xO4Yn1oPjfLxUs2ZVMEIz96bTvzqF8K5WkyID6Io4XwtKTbgWNV0lm4fHD3oshBrzzJhMNkWoi6+Tih8Fsh6LMqWEKaO0BmPbVW4hfAr0FQKtfP6faQIP83/9Mi+7Czl3e6aOeXHYPdNKJB1GdxAgMBAAEwCwYJKoZIhvcNAQELA4IBAQARxLmIp7wh43+ubzynD3UwpQ9b+6k2RYQ86Rbx/0SKiVo/iiRVZJIojoQxz5gV3OBSJEpAK3Lq0ilvx63BRzgsARS/wYfjxhc20bXQ94B9vAAB8L203VmpnZ/DFGfHNuTrTKdFyMz/4ZuifZVOevkcSxQk8Kqop0CYfP0QRhAoWWa8Pj4YVCDkFdqBbuvZskEJ2mEULxz0Rmfcxi2Css76cBkpYCS2r6gZptpZ68+EvGOCbsvPPQ+rRHhzVCzHaLX0cA+nC1lBpyWmLlJdJ+wy2Hxh9hwRM7GoaZJZ1kixMRKK1cx5p3u/ZDmX4F0plN+gPW/iWspTAvZeyBV8e8Sq")
-	//expected, err := base64.StdEncoding.DecodeString("MIIEijCCA3KgAwIBAgICEk0wDQYJKoZIhvcNAQELBQAwKzEpMCcGA1UEAwwgY2Fja2xpbmcgY3J5cHRvZ3JhcGhlciBmYWtlIFJPT1QwHhcNMTUxMDIxMjAxMTUyWhcNMjAxMDE5MjAxMTUyWjAfMR0wGwYDVQQDExRoYXBweSBoYWNrZXIgZmFrZSBDQTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMIKR3maBcUSsncXYzQT13D5Nr+Z3mLxMMh3TUdt6sACmqbJ0btRlgXfMtNLM2OU1I6a3Ju+tIZSdn2v21JBwvxUzpZQ4zy2cimIiMQDZCQHJwzC9GZn8HaW091iz9H0Go3A7WDXwYNmsdLNRi00o14UjoaVqaPsYrZWvRKaIRqaU0hHmS0AWwQSvN/93iMIXuyiwywmkwKbWnnxCQ/gsctKFUtcNrwEx9Wgj6KlhwDTyI1QWSBbxVYNyUgPFzKxrSmwMO0yNff7ho+QT9x5+Y/7XE59S4Mc4ZXxcXKew/gSlN9U5mvT+D2BhDtkCupdfsZNCQWp27A+b/DmrFI9NqsCAwEAAaOCAcIwggG+MBIGA1UdEwEB/wQIMAYBAf8CAQAwQwYDVR0eBDwwOqE4MAaCBC5taWwwCocIAAAAAAAAAAAwIocgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwDgYDVR0PAQH/BAQDAgGGMH8GCCsGAQUFBwEBBHMwcTAyBggrBgEFBQcwAYYmaHR0cDovL2lzcmcudHJ1c3RpZC5vY3NwLmlkZW50cnVzdC5jb20wOwYIKwYBBQUHMAKGL2h0dHA6Ly9hcHBzLmlkZW50cnVzdC5jb20vcm9vdHMvZHN0cm9vdGNheDMucDdjMB8GA1UdIwQYMBaAFOmkP+6epeby1dd5YDyTpi4kjpeqMFQGA1UdIARNMEswCAYGZ4EMAQIBMD8GCysGAQQBgt8TAQEBMDAwLgYIKwYBBQUHAgEWImh0dHA6Ly9jcHMucm9vdC14MS5sZXRzZW5jcnlwdC5vcmcwPAYDVR0fBDUwMzAxoC+gLYYraHR0cDovL2NybC5pZGVudHJ1c3QuY29tL0RTVFJPT1RDQVgzQ1JMLmNybDAdBgNVHQ4EFgQU+3hPEvlgFYMsnxd/NBmzLjbqQYkwDQYJKoZIhvcNAQELBQADggEBAA0YAeLXOklx4hhCikUUl+BdnFfn1g0W5AiQLVNIOL6PnqXu0wjnhNyhqdwnfhYMnoy4idRh4lB6pz8Gf9pnlLd/DnWSV3gS+/I/mAl1dCkKby6H2V790e6IHmIK2KYm3jm+U++FIdGpBdsQTSdmiX/rAyuxMDM0adMkNBwTfQmZQCz6nGHw1QcSPZMvZpsC8SkvekzxsjF1otOrMUPNPQvtTWrVx8GlR2qfx/4xbQa1v2frNvFBCmO59goz+jnWvfTtj2NjwDZ7vlMBsPm16dbKYC840uvRoZjxqsdc3ChCZjqimFqlNG/xoPA8+dTicZzCXE9ijPIcvW6y1aa3bGw=")
-	if err != nil {
-		return
-	}
-	template := []*pkcs11.Attribute{
-		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_CERTIFICATE),
-		//pkcs11.NewAttribute(pkcs11.CKA_VALUE, expected),
-	}
-	if err := module.FindObjectsInit(session, template); err != nil {
-		return nil, err
-	}
-	certHandles, _, err := module.FindObjects(session, 1024)
-	if err != nil {
-		return nil, err
-	}
-	if err = module.FindObjectsFinal(session); err != nil {
-		return nil, err
-	}
-	fmt.Println("RRR", len(certHandles))
-	for _, certHandle := range certHandles {
-		fmt.Println("YYY")
-		attrs, err := module.GetAttributeValue(session, certHandle, []*pkcs11.Attribute{
-			pkcs11.NewAttribute(pkcs11.CKA_VALUE, nil),
-		})
-		if err != nil {
-			return nil, err
-		}
-		if len(attrs) == 0 || len(attrs[0].Value) == 0 {
-			//return nil, fmt.Errorf("pkcs11: certificate %d is missing subject attribute", certHandle)
-			continue
-		}
-		fmt.Println(base64.StdEncoding.EncodeToString(attrs[0].Value))
-		//fmt.Println(string(attrs[0].Value))
 	}
 	return ps, nil
 }
 
-func (ps *Key) setup(privateKeyLabel string) (err error) {
+func (ps *Key) getPublicKeyID(publicKey interface{}) ([]byte, error) {
+	session := *ps.session
+
+	marshalledPublicKey, err := x509.MarshalPKIXPublicKey(publicKey)
+	if err != nil {
+		return nil, err
+	}
+
+	template := []*pkcs11.Attribute{
+		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PUBLIC_KEY),
+		//pkcs11.NewAttribute(pkcs11.CKA_VALUE, expected),
+	}
+	if err := ps.module.FindObjectsInit(session, template); err != nil {
+		return nil, err
+	}
+
+	publicKeyHandles, _, err := ps.module.FindObjects(session, 1024)
+	if err != nil {
+		return nil, err
+	}
+	if err = ps.module.FindObjectsFinal(session); err != nil {
+		return nil, err
+	}
+	for _, publicKeyHandle := range publicKeyHandles {
+		attrs, err := ps.module.GetAttributeValue(session, publicKeyHandle, []*pkcs11.Attribute{
+			pkcs11.NewAttribute(pkcs11.CKA_VALUE, nil),
+			pkcs11.NewAttribute(pkcs11.CKA_ID, nil),
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(attrs) < 2 {
+			continue
+		}
+		if attrs[0].Type == pkcs11.CKA_VALUE &&
+			attrs[1].Type == pkcs11.CKA_ID &&
+			bytes.Equal(attrs[0].Value, marshalledPublicKey) {
+			return attrs[1].Value, nil
+		}
+	}
+	return nil, fmt.Errorf("no matching public key found in PKCS#11 token")
+}
+
+func (ps *Key) setup(publicKey interface{}) (err error) {
 	// Open a session
 	ps.sessionMu.Lock()
 	defer ps.sessionMu.Unlock()
@@ -217,28 +224,43 @@ func (ps *Key) setup(privateKeyLabel string) (err error) {
 	if err != nil {
 		return
 	}
+
 	ps.session = &session
 
-	// Fetch the private key by its label
-	privateKeyHandle, err := ps.getPrivateKey(ps.module, session, privateKeyLabel)
+	publicKeyID, err := ps.getPublicKeyID(publicKey)
+	if err != nil {
+		return fmt.Errorf("getting public key: %s: %s", publicKey, err)
+	}
+
+	// Login
+	// Note: Logged-in status is application-wide, not per session. But in
+	// practice it appears to be okay to login to a token multiple times with the same
+	// credentials.
+	if err = ps.module.Login(session, pkcs11.CKU_USER, ps.pin); err != nil {
+		if err == pkcs11.Error(pkcs11.CKR_USER_ALREADY_LOGGED_IN) {
+			// But if the token says we're already logged in, it's ok.
+			err = nil
+		} else {
+			ps.module.CloseSession(session)
+			return err
+		}
+	}
+
+	// Fetch the private key by matching its id to the public key handle.
+	privateKeyHandle, err := ps.getPrivateKey(ps.module, session, publicKeyID)
 	if err != nil {
 		ps.module.CloseSession(session)
-		return
+		return fmt.Errorf("getting private key: %s", err)
 	}
 	ps.privateKeyHandle = privateKeyHandle
-
-	err = ps.loadPublicKey(ps.module, session, privateKeyHandle)
-	if err != nil {
-		ps.module.CloseSession(session)
-	}
 	return
 }
 
-func (ps *Key) getPrivateKey(module ctx, session pkcs11.SessionHandle, label string) (pkcs11.ObjectHandle, error) {
+func (ps *Key) getPrivateKey(module ctx, session pkcs11.SessionHandle, publicKeyID []byte) (pkcs11.ObjectHandle, error) {
 	var noHandle pkcs11.ObjectHandle
 	template := []*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PRIVATE_KEY),
-		pkcs11.NewAttribute(pkcs11.CKA_LABEL, label),
+		pkcs11.NewAttribute(pkcs11.CKA_ID, publicKeyID),
 	}
 	if err := module.FindObjectsInit(session, template); err != nil {
 		return noHandle, err
@@ -276,191 +298,6 @@ func (ps *Key) getPrivateKey(module ctx, session pkcs11.SessionHandle, label str
 	}
 
 	return privateKeyHandle, nil
-}
-
-// Get the public key matching an RSA private key
-func getRSAPublicKey(module ctx, session pkcs11.SessionHandle, privateKeyHandle pkcs11.ObjectHandle) (crypto.PublicKey, error) {
-	var noKey crypto.PublicKey
-	template := []*pkcs11.Attribute{
-		pkcs11.NewAttribute(pkcs11.CKA_MODULUS, nil),
-		pkcs11.NewAttribute(pkcs11.CKA_PUBLIC_EXPONENT, nil),
-	}
-	attr, err := module.GetAttributeValue(session, privateKeyHandle, template)
-	if err != nil {
-		return noKey, err
-	}
-
-	n := big.NewInt(0)
-	e := int(0)
-	gotModulus, gotExponent := false, false
-	for _, a := range attr {
-		if a.Type == pkcs11.CKA_MODULUS {
-			n.SetBytes(a.Value)
-			gotModulus = true
-		} else if a.Type == pkcs11.CKA_PUBLIC_EXPONENT {
-			bigE := big.NewInt(0)
-			bigE.SetBytes(a.Value)
-			e = int(bigE.Int64())
-			gotExponent = true
-		}
-	}
-	if !gotModulus {
-		return noKey, errors.New("key missing public modulus")
-	}
-	if !gotExponent {
-		return noKey, errors.New("key missing public exponent")
-	}
-
-	rsa := rsa.PublicKey{
-		N: n,
-		E: e,
-	}
-	return &rsa, nil
-}
-
-// Get the public key matching an Elliptic Curve private key
-func getECPublicKey(module ctx, session pkcs11.SessionHandle, privateKeyHandle pkcs11.ObjectHandle) (crypto.PublicKey, error) {
-	var noKey crypto.PublicKey
-
-	// http://docs.oasis-open.org/pkcs11/pkcs11-curr/v2.40/os/pkcs11-curr-v2.40-os.html#_Toc416960012
-	template := []*pkcs11.Attribute{
-		// CKA_EC_PARAMS contains the OID of the curve (part of the
-		// public key
-		pkcs11.NewAttribute(pkcs11.CKA_EC_PARAMS, nil),
-		// CKA_ID will allow use to find the corresponding public key
-		pkcs11.NewAttribute(pkcs11.CKA_ID, nil),
-	}
-
-	attr, err := module.GetAttributeValue(session, privateKeyHandle, template)
-	if err != nil {
-		return noKey, err
-	}
-
-	oid := []byte{}
-	id := []byte{}
-	gotOid, gotID := false, false
-	for _, a := range attr {
-		if a.Type == pkcs11.CKA_EC_PARAMS {
-			oid = a.Value
-			gotOid = true
-		} else if a.Type == pkcs11.CKA_ID {
-			id = a.Value
-			gotID = true
-		}
-	}
-	if !gotOid {
-		return noKey, errors.New("private key missing curve parameters")
-	}
-	if !gotID {
-		return noKey, errors.New("private key missing identifier (CKA_ID)")
-	}
-
-	poid := new(asn1.ObjectIdentifier)
-	asn1.Unmarshal(oid, poid)
-	curve := namedCurveFromOID(*poid)
-
-	templateSearch := []*pkcs11.Attribute{
-		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PUBLIC_KEY),
-		pkcs11.NewAttribute(pkcs11.CKA_ID, id),
-	}
-
-	if err := module.FindObjectsInit(session, templateSearch); err != nil {
-		return noKey, err
-	}
-	objs, _, err := module.FindObjects(session, 1)
-	if err != nil {
-		return noKey, err
-	}
-	if err = module.FindObjectsFinal(session); err != nil {
-		return noKey, err
-	}
-
-	if len(objs) == 0 {
-		return noKey, fmt.Errorf("public key not found")
-	}
-	publicKeyHandle := objs[0]
-
-	templatePub := []*pkcs11.Attribute{
-		pkcs11.NewAttribute(pkcs11.CKA_EC_POINT, nil),
-	}
-
-	attrPub, err := module.GetAttributeValue(session, publicKeyHandle, templatePub)
-	if err != nil {
-		return noKey, err
-	}
-
-	ecPoint := []byte{}
-	gotEcPoint := false
-	for _, a := range attrPub {
-		if a.Type == pkcs11.CKA_EC_POINT {
-			ecPoint = a.Value
-			gotEcPoint = true
-		}
-	}
-	if !gotEcPoint {
-		return noKey, errors.New("public key missing EC Point")
-	}
-
-	x, y := readECPoint(curve, ecPoint)
-	if x == nil {
-		return noKey, errors.New("invalid EC Point")
-	}
-	ecdsa := ecdsa.PublicKey{
-		Curve: curve,
-		X:     x,
-		Y:     y,
-	}
-	return &ecdsa, nil
-}
-
-// Decode Q point from CKA_EC_POINT attribute
-func readECPoint(curve elliptic.Curve, ecpoint []byte) (*big.Int, *big.Int) {
-	x, y := elliptic.Unmarshal(curve, ecpoint)
-	if x == nil {
-		// http://docs.oasis-open.org/pkcs11/pkcs11-curr/v2.40/os/pkcs11-curr-v2.40-os.html#_ftn1
-		// PKCS#11 v2.20 specified that the CKA_EC_POINT was to be store in a DER-encoded
-		// OCTET STRING.
-		var point asn1.RawValue
-		asn1.Unmarshal(ecpoint, &point)
-		if len(point.Bytes) > 0 {
-			x, y = elliptic.Unmarshal(curve, point.Bytes)
-		}
-	}
-	return x, y
-}
-
-// Get the public key matching a private key
-func (ps *Key) loadPublicKey(module ctx, session pkcs11.SessionHandle, privateKeyHandle pkcs11.ObjectHandle) error {
-	keyType, err := getKeyType(ps.module, session, privateKeyHandle)
-	if err != nil {
-		return err
-	}
-
-	switch keyType {
-	case pkcs11.CKK_RSA:
-		ps.publicKey, err = getRSAPublicKey(ps.module, session, privateKeyHandle)
-	case pkcs11.CKK_EC:
-		ps.publicKey, err = getECPublicKey(ps.module, session, privateKeyHandle)
-	default:
-		return fmt.Errorf("Unsupported key type %d", keyType)
-	}
-	return err
-}
-
-func getKeyType(module ctx, session pkcs11.SessionHandle, privateKeyHandle pkcs11.ObjectHandle) (c byte, err error) {
-	attributes, err := module.GetAttributeValue(session, privateKeyHandle, []*pkcs11.Attribute{
-		pkcs11.NewAttribute(pkcs11.CKA_KEY_TYPE, false),
-	})
-	if err != nil {
-		return
-	}
-
-	if (len(attributes) > 0) && (len(attributes[0].Value) > 0) {
-		c = attributes[0].Value[0]
-	} else {
-		err = fmt.Errorf("No key type")
-	}
-	return
 }
 
 // Destroy tears down a Key by closing the session. It should be
@@ -506,21 +343,6 @@ func (ps *Key) openSession() (pkcs11.SessionHandle, error) {
 		if err != nil {
 			return session, err
 		}
-
-		// Login
-		// Note: Logged-in status is application-wide, not per session. But in
-		// practice it appears to be okay to login to a token multiple times with the same
-		// credentials.
-		/*if err = ps.module.Login(session, pkcs11.CKU_USER, ps.pin); err != nil {
-			if err == pkcs11.Error(pkcs11.CKR_USER_ALREADY_LOGGED_IN) {
-				// But if the token says we're already logged in, it's ok.
-				err = nil
-			} else {
-				ps.module.CloseSession(session)
-				return session, err
-			}
-		}
-		*/
 
 		return session, err
 	}

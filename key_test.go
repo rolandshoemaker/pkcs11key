@@ -1,5 +1,7 @@
 package pkcs11key
 
+/*
+
 import (
 	"bytes"
 	"crypto"
@@ -382,3 +384,4 @@ func TestAttributeTypeInvalid(t *testing.T) {
 		t.Errorf("Failed to set up with a token that returns CKR_ATTRIBUTE_TYPE_INVALID: %s", err)
 	}
 }
+*/
