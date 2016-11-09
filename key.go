@@ -178,7 +178,7 @@ func (ps *Key) getPublicKeyID(publicKey crypto.PublicKey) ([]byte, error) {
 
 	marshalledPublicKey, err := x509.MarshalPKIXPublicKey(publicKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("marshalling public key of type %T: %s", publicKey, err)
 	}
 
 	template := []*pkcs11.Attribute{
@@ -229,7 +229,7 @@ func (ps *Key) setup(publicKey crypto.PublicKey) (err error) {
 
 	publicKeyID, err := ps.getPublicKeyID(publicKey)
 	if err != nil {
-		return fmt.Errorf("getting public key: %s: %s", publicKey, err)
+		return fmt.Errorf("getting public key: %s", err)
 	}
 
 	// Login

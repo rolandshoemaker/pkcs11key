@@ -1,16 +1,11 @@
 package pkcs11key
 
-/*
-
 import (
 	"bytes"
 	"crypto"
-	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
-	"encoding/asn1"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/miekg/pkcs11"
@@ -292,72 +287,6 @@ func TestSign(t *testing.T) {
 	}
 }
 
-func TestReadECPoint(t *testing.T) {
-	ps := setup(t, "ec")
-	pub := ps.Public()
-	// Check public key is of right type
-	ecPub, ok := pub.(*ecdsa.PublicKey)
-	if !ok {
-		t.Fatalf("Attempted to load ECDSA key from module, got key of type %s. Expected *ecdsa.PublicKey", reflect.TypeOf(pub))
-	}
-
-	// Disable this test because it can only work in go 1.5 and later
-	// if ! strings.EqualFold(ecPub.Curve.Params().Name, "P-256") {
-	// 	t.Fatal("Invalid curve decoded")
-	// }
-
-	curve := namedCurveFromOID(asn1.ObjectIdentifier{1, 2, 840, 10045, 3, 1, 7})
-	x, y := readECPoint(curve, ecPoint)
-
-	if !(bytes.Equal(ecPub.X.Bytes(), x.Bytes()) &&
-		bytes.Equal(ecPub.Y.Bytes(), y.Bytes())) {
-		t.Errorf("Incorrect value for EC Point with ASN.1")
-	}
-
-	x, y = readECPoint(curve, ecPoint[2:])
-	if !(bytes.Equal(ecPub.X.Bytes(), x.Bytes()) &&
-		bytes.Equal(ecPub.Y.Bytes(), y.Bytes())) {
-		t.Errorf("Incorrect value for EC Point without ASN.1")
-	}
-
-	x, y = readECPoint(curve, []byte{0x04, 0x05, 0x04, 0x1, 0x2, 0x3, 0x4})
-	if x != nil {
-		t.Errorf("Unexpected EC point with ASN.1")
-	}
-
-	x, y = readECPoint(curve, []byte{0x04, 0x1, 0x2, 0x3, 0x4})
-	if x != nil {
-		t.Errorf("Unexpected EC point with ASN.1")
-	}
-
-}
-
-func TestEcKeyErrors(t *testing.T) {
-	k := Key{
-		module:     &mockCtx{},
-		tokenLabel: "token label",
-		pin:        "unused",
-	}
-
-	// Trying to load private EC key with no public key
-	err := k.setup("no_public_key_ec")
-	if err == nil {
-		t.Errorf("Unexpected success")
-	}
-	if !strings.EqualFold(err.Error(), "public key not found") {
-		t.Errorf("Unexpected error value: %v", err)
-	}
-
-	// Trying to load private EC key with invalid EC point
-	err = k.setup("invalid_ec_point")
-	if err == nil {
-		t.Errorf("Unexpected success")
-	}
-	if !strings.EqualFold(err.Error(), "invalid EC Point") {
-		t.Errorf("Unexpected error value: %v", err)
-	}
-}
-
 // This is a version of the mock that gives CKR_ATTRIBUTE_TYPE_INVALID when
 // asked about the CKA_ALWAYS_AUTHENTICATE attribute.
 type mockCtxFailsAlwaysAuthenticate struct {
@@ -384,4 +313,3 @@ func TestAttributeTypeInvalid(t *testing.T) {
 		t.Errorf("Failed to set up with a token that returns CKR_ATTRIBUTE_TYPE_INVALID: %s", err)
 	}
 }
-*/
