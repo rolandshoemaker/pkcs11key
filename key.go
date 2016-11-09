@@ -148,7 +148,7 @@ func initialize(modulePath string) (ctx, error) {
 }
 
 // New instantiates a new handle to a PKCS #11-backed key.
-func New(modulePath, tokenLabel, pin string, publicKey interface{}) (ps *Key, err error) {
+func New(modulePath, tokenLabel, pin string, publicKey crypto.PublicKey) (ps *Key, err error) {
 	module, err := initialize(modulePath)
 	if err != nil {
 		return
@@ -173,7 +173,7 @@ func New(modulePath, tokenLabel, pin string, publicKey interface{}) (ps *Key, er
 	return ps, nil
 }
 
-func (ps *Key) getPublicKeyID(publicKey interface{}) ([]byte, error) {
+func (ps *Key) getPublicKeyID(publicKey crypto.PublicKey) ([]byte, error) {
 	session := *ps.session
 
 	marshalledPublicKey, err := x509.MarshalPKIXPublicKey(publicKey)
@@ -216,7 +216,7 @@ func (ps *Key) getPublicKeyID(publicKey interface{}) ([]byte, error) {
 	return nil, fmt.Errorf("no matching public key found in PKCS#11 token")
 }
 
-func (ps *Key) setup(publicKey interface{}) (err error) {
+func (ps *Key) setup(publicKey crypto.PublicKey) (err error) {
 	// Open a session
 	ps.sessionMu.Lock()
 	defer ps.sessionMu.Unlock()
