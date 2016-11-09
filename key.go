@@ -346,7 +346,7 @@ func (ps *Key) openSession() (pkcs11.SessionHandle, error) {
 
 		return session, err
 	}
-	return noSession, fmt.Errorf("No slot found matching token label '%s'", ps.tokenLabel)
+	return noSession, fmt.Errorf("no slot found matching token label %q", ps.tokenLabel)
 }
 
 // Public returns the public key for the PKCS #11 key.
@@ -359,7 +359,7 @@ func (ps *Key) Sign(rand io.Reader, msg []byte, opts crypto.SignerOpts) (signatu
 	ps.sessionMu.Lock()
 	defer ps.sessionMu.Unlock()
 	if ps.session == nil {
-		return nil, errors.New("Session was nil")
+		return nil, errors.New("session was nil")
 	}
 
 	// When the alwaysAuthenticate bit is true (e.g. on a Yubikey NEO in PIV mode),
