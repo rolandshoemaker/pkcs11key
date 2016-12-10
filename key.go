@@ -133,12 +133,12 @@ func initialize(modulePath string) (ctx, error) {
 
 	newModule := pkcs11.New(modulePath)
 	if newModule == nil {
-		return nil, fmt.Errorf("unable to load PKCS#11 module from %q", modulePath)
+		return nil, fmt.Errorf("failed to load module '%s'", modulePath)
 	}
 
 	err := newModule.Initialize()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to initialize module: %s", err)
 	}
 
 	modules[modulePath] = ctx(newModule)
@@ -147,18 +147,18 @@ func initialize(modulePath string) (ctx, error) {
 }
 
 // New instantiates a new handle to a PKCS #11-backed key.
-func New(modulePath, tokenLabel, pin string, publicKey crypto.PublicKey) (ps *Key, err error) {
+func New(modulePath, tokenLabel, pin string, publicKey crypto.PublicKey) (*Key, error) {
 	module, err := initialize(modulePath)
 	if err != nil {
-		return
+		return nil, fmt.Errorf("pkcs11key: %s", err)
 	}
 	if module == nil {
-		err = fmt.Errorf("nil module")
-		return
+		err = fmt.Errorf("pkcs11key: nil module")
+		return nil, err
 	}
 
 	// Initialize a partial key
-	ps = &Key{
+	ps := &Key{
 		module:     module,
 		tokenLabel: tokenLabel,
 		pin:        pin,
@@ -167,7 +167,7 @@ func New(modulePath, tokenLabel, pin string, publicKey crypto.PublicKey) (ps *Ke
 
 	err = ps.setup()
 	if err != nil {
-		return
+		return nil, fmt.Errorf("pkcs11key: %s", err)
 	}
 	return ps, nil
 }
@@ -230,7 +230,7 @@ func (ps *Key) setup() error {
 	defer ps.sessionMu.Unlock()
 	session, err := ps.openSession()
 	if err != nil {
-		return err
+		return fmt.Errorf("pkcs11key: opening session: %s", err)
 	}
 
 	ps.session = &session
@@ -305,7 +305,7 @@ func (ps *Key) Destroy() error {
 		err := ps.module.CloseSession(*ps.session)
 		ps.session = nil
 		if err != nil {
-			return err
+			return fmt.Errorf("pkcs11key: close session: %s", err)
 		}
 	}
 	return nil
@@ -363,7 +363,7 @@ func (ps *Key) Sign(rand io.Reader, msg []byte, opts crypto.SignerOpts) (signatu
 	ps.sessionMu.Lock()
 	defer ps.sessionMu.Unlock()
 	if ps.session == nil {
-		return nil, errors.New("session was nil")
+		return nil, errors.New("pkcs11key: session was nil")
 	}
 
 	// When the alwaysAuthenticate bit is true (e.g. on a Yubikey NEO in PIV mode),
@@ -378,10 +378,10 @@ func (ps *Key) Sign(rand io.Reader, msg []byte, opts crypto.SignerOpts) (signatu
 		modulesMu.Lock()
 		defer modulesMu.Unlock()
 		if err := ps.module.Logout(*ps.session); err != nil {
-			return nil, fmt.Errorf("logout: %s", err)
+			return nil, fmt.Errorf("pkcs11key: logout: %s", err)
 		}
 		if err = ps.module.Login(*ps.session, pkcs11.CKU_USER, ps.pin); err != nil {
-			return nil, fmt.Errorf("login: %s", err)
+			return nil, fmt.Errorf("pkcs11key: login: %s", err)
 		}
 	}
 
@@ -389,7 +389,7 @@ func (ps *Key) Sign(rand io.Reader, msg []byte, opts crypto.SignerOpts) (signatu
 	hash := opts.HashFunc()
 	hashLen := hash.Size()
 	if len(msg) != hashLen {
-		err = fmt.Errorf("input size does not match hash function output size: %d vs %d", len(msg), hashLen)
+		err = fmt.Errorf("pkcs11key: input size does not match hash function output size: %d vs %d", len(msg), hashLen)
 		return
 	}
 
@@ -402,7 +402,7 @@ func (ps *Key) Sign(rand io.Reader, msg []byte, opts crypto.SignerOpts) (signatu
 		mechanism = []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)}
 		prefix, ok := hashPrefixes[hash]
 		if !ok {
-			err = errors.New("unknown hash function")
+			err = errors.New("pkcs11key: unknown hash function")
 			return
 		}
 		signatureInput = append(prefix, msg...)
@@ -416,12 +416,12 @@ func (ps *Key) Sign(rand io.Reader, msg []byte, opts crypto.SignerOpts) (signatu
 	// Perform the sign operation
 	err = ps.module.SignInit(*ps.session, mechanism, ps.privateKeyHandle)
 	if err != nil {
-		return nil, fmt.Errorf("sign init: %s", err)
+		return nil, fmt.Errorf("pkcs11key: sign init: %s", err)
 	}
 
 	signature, err = ps.module.Sign(*ps.session, signatureInput)
 	if err != nil {
-		return nil, fmt.Errorf("sign: %s", err)
+		return nil, fmt.Errorf("pkcs11key: sign: %s", err)
 	}
 	return
 }
