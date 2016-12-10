@@ -5,7 +5,6 @@
 package pkcs11key
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -173,44 +172,53 @@ func New(modulePath, tokenLabel, pin string, publicKey crypto.PublicKey) (ps *Ke
 	return ps, nil
 }
 
-func (ps *Key) getPublicKeyID(publicKey crypto.PublicKey) ([]byte, error) {
-	session := *ps.session
+// findObjects finds objects in the PKCS#11 token according to a template. It
+// returns error if there are more than 1024 results, or if there was an error
+// during the find calls. It must be called with the ps.sessionMu lock held.
+func (ps *Key) findObjects(template []*pkcs11.Attribute) ([]pkcs11.ObjectHandle, error) {
+	if err := ps.module.FindObjectsInit(*ps.session, template); err != nil {
+		return nil, err
+	}
 
+	handles, moreAvailable, err := ps.module.FindObjects(*ps.session, 1024)
+	if err != nil {
+		return nil, err
+	}
+	if moreAvailable {
+		return nil, errors.New("too many objects returned from FindObjects")
+	}
+	if err = ps.module.FindObjectsFinal(*ps.session); err != nil {
+		return nil, err
+	}
+	return handles, nil
+}
+
+// getPublicKeyID looks up the given public key in the PKCS#11 token, and
+// returns its ID as a []byte, for use in looking up the corresponding private
+// key. It must be called with the ps.sessionMu lock held.
+func (ps *Key) getPublicKeyID(publicKey crypto.PublicKey) ([]byte, error) {
 	marshalledPublicKey, err := x509.MarshalPKIXPublicKey(publicKey)
 	if err != nil {
 		return nil, fmt.Errorf("marshalling public key of type %T: %s", publicKey, err)
 	}
 
-	template := []*pkcs11.Attribute{
+	publicKeyHandles, err := ps.findObjects([]*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PUBLIC_KEY),
-		//pkcs11.NewAttribute(pkcs11.CKA_VALUE, expected),
-	}
-	if err := ps.module.FindObjectsInit(session, template); err != nil {
-		return nil, err
-	}
-
-	publicKeyHandles, _, err := ps.module.FindObjects(session, 1024)
+		pkcs11.NewAttribute(pkcs11.CKA_VALUE, marshalledPublicKey),
+	})
 	if err != nil {
 		return nil, err
 	}
-	if err = ps.module.FindObjectsFinal(session); err != nil {
-		return nil, err
-	}
+
 	for _, publicKeyHandle := range publicKeyHandles {
-		attrs, err := ps.module.GetAttributeValue(session, publicKeyHandle, []*pkcs11.Attribute{
-			pkcs11.NewAttribute(pkcs11.CKA_VALUE, nil),
+		attrs, err := ps.module.GetAttributeValue(*ps.session, publicKeyHandle, []*pkcs11.Attribute{
 			pkcs11.NewAttribute(pkcs11.CKA_ID, nil),
 		})
 		if err != nil {
 			return nil, err
 		}
-		if len(attrs) < 2 {
-			continue
-		}
-		if attrs[0].Type == pkcs11.CKA_VALUE &&
-			attrs[1].Type == pkcs11.CKA_ID &&
-			bytes.Equal(attrs[0].Value, marshalledPublicKey) {
-			return attrs[1].Value, nil
+		if len(attrs) > 0 && attrs[0].Type == pkcs11.CKA_ID {
+			return attrs[0].Value, nil
 		}
 	}
 	return nil, fmt.Errorf("no matching public key found in PKCS#11 token")
@@ -229,21 +237,8 @@ func (ps *Key) setup(publicKey crypto.PublicKey) (err error) {
 
 	publicKeyID, err := ps.getPublicKeyID(publicKey)
 	if err != nil {
-		return fmt.Errorf("getting public key: %s", err)
-	}
-
-	// Login
-	// Note: Logged-in status is application-wide, not per session. But in
-	// practice it appears to be okay to login to a token multiple times with the same
-	// credentials.
-	if err = ps.module.Login(session, pkcs11.CKU_USER, ps.pin); err != nil {
-		if err == pkcs11.Error(pkcs11.CKR_USER_ALREADY_LOGGED_IN) {
-			// But if the token says we're already logged in, it's ok.
-			err = nil
-		} else {
-			ps.module.CloseSession(session)
-			return err
-		}
+		ps.module.CloseSession(session)
+		return
 	}
 
 	// Fetch the private key by matching its id to the public key handle.
@@ -344,6 +339,20 @@ func (ps *Key) openSession() (pkcs11.SessionHandle, error) {
 			return session, err
 		}
 
+		// Login
+		// Note: Logged-in status is application-wide, not per session. But in
+		// practice it appears to be okay to login to a token multiple times with the same
+		// credentials.
+		if err = ps.module.Login(session, pkcs11.CKU_USER, ps.pin); err != nil {
+			if err == pkcs11.Error(pkcs11.CKR_USER_ALREADY_LOGGED_IN) {
+				// But if the token says we're already logged in, it's ok.
+				err = nil
+			} else {
+				ps.module.CloseSession(session)
+				return session, err
+			}
+		}
+
 		return session, err
 	}
 	return noSession, fmt.Errorf("no slot found matching token label %q", ps.tokenLabel)
@@ -405,6 +414,8 @@ func (ps *Key) Sign(rand io.Reader, msg []byte, opts crypto.SignerOpts) (signatu
 	case *ecdsa.PublicKey:
 		mechanism = []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_ECDSA, nil)}
 		signatureInput = msg
+	default:
+		return nil, fmt.Errorf("unrecognized key type %T", ps.publicKey)
 	}
 
 	// Perform the sign operation
