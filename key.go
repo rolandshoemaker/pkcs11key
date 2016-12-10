@@ -172,25 +172,27 @@ func New(modulePath, tokenLabel, pin string, publicKey crypto.PublicKey) (*Key, 
 	return ps, nil
 }
 
-// findObjects finds objects in the PKCS#11 token according to a template. It
-// returns error if there are more than 1024 results, or if there was an error
+// findObject finds an object in the PKCS#11 token according to a template. It
+// returns error if there are more than one result, or if there was an error
 // during the find calls. It must be called with the ps.sessionMu lock held.
-func (ps *Key) findObjects(template []*pkcs11.Attribute) ([]pkcs11.ObjectHandle, error) {
+func (ps *Key) findObject(template []*pkcs11.Attribute) (pkcs11.ObjectHandle, error) {
 	if err := ps.module.FindObjectsInit(*ps.session, template); err != nil {
-		return nil, err
+		return 0, err
 	}
 
-	handles, moreAvailable, err := ps.module.FindObjects(*ps.session, 1024)
+	handles, moreAvailable, err := ps.module.FindObjects(*ps.session, 1)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	if moreAvailable {
-		return nil, errors.New("too many objects returned from FindObjects")
+		return 0, errors.New("too many objects returned from FindObjects")
 	}
 	if err = ps.module.FindObjectsFinal(*ps.session); err != nil {
-		return nil, err
+		return 0, err
+	} else if len(handles) == 0 {
+		return 0, errors.New("no objects found")
 	}
-	return handles, nil
+	return handles[0], nil
 }
 
 // getPublicKeyID looks up the given public key in the PKCS#11 token, and
@@ -202,19 +204,15 @@ func (ps *Key) getPublicKeyID(publicKey crypto.PublicKey) ([]byte, error) {
 		return nil, fmt.Errorf("marshalling public key of type %T: %s", publicKey, err)
 	}
 
-	publicKeyHandles, err := ps.findObjects([]*pkcs11.Attribute{
+	publicKeyHandle, err := ps.findObject([]*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PUBLIC_KEY),
 		pkcs11.NewAttribute(pkcs11.CKA_VALUE, marshalledPublicKey),
 	})
 	if err != nil {
 		return nil, err
-	} else if len(publicKeyHandles) == 0 {
-		return nil, fmt.Errorf("no matching public key found in PKCS#11 token")
-	} else if len(publicKeyHandles) > 1 {
-		return nil, fmt.Errorf("too many matching public keys found in PKCS#11 token")
 	}
 
-	attrs, err := ps.module.GetAttributeValue(*ps.session, publicKeyHandles[0], []*pkcs11.Attribute{
+	attrs, err := ps.module.GetAttributeValue(*ps.session, publicKeyHandle, []*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_ID, nil),
 	})
 	if err != nil {
@@ -257,18 +255,13 @@ func (ps *Key) setup() error {
 // provided publicKeyID. It must be called with the ps.sessionMu lock held.
 func (ps *Key) getPrivateKey(module ctx, session pkcs11.SessionHandle, publicKeyID []byte) (pkcs11.ObjectHandle, error) {
 	var noHandle pkcs11.ObjectHandle
-	handles, err := ps.findObjects([]*pkcs11.Attribute{
+	privateKeyHandle, err := ps.findObject([]*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PRIVATE_KEY),
 		pkcs11.NewAttribute(pkcs11.CKA_ID, publicKeyID),
 	})
 	if err != nil {
 		return noHandle, err
 	}
-
-	if len(handles) == 0 {
-		return noHandle, fmt.Errorf("private key not found")
-	}
-	privateKeyHandle := handles[0]
 
 	// Check whether the key has the CKA_ALWAYS_AUTHENTICATE attribute.
 	// If so, fail: we don't want to have to re-authenticate for each sign

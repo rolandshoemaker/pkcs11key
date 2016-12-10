@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"math/big"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/miekg/pkcs11"
@@ -242,10 +241,10 @@ func TestInitializeKeyNotFound(t *testing.T) {
 		publicKey:  pubKey,
 	}
 	err := ps.setup()
-	expectedText := "no matching public key found"
+	expectedText := "looking up public key: no objects found"
 	if err == nil {
 		t.Errorf("Expected error looking up nonexistent key")
-	} else if !strings.Contains(err.Error(), expectedText) {
+	} else if err.Error() != expectedText {
 		t.Errorf("Expected error to contain %q, got %q", expectedText, err)
 	}
 }
