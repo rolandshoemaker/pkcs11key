@@ -232,7 +232,6 @@ func (ps *Key) setup() error {
 	if err != nil {
 		return fmt.Errorf("pkcs11key: opening session: %s", err)
 	}
-
 	ps.session = &session
 
 	publicKeyID, err := ps.getPublicKeyID(ps.publicKey)
