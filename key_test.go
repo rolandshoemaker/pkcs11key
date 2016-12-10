@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/miekg/pkcs11"
@@ -232,6 +233,23 @@ func TestInitializeBadModule(t *testing.T) {
 	}
 }
 
+func TestInitializeKeyNotFound(t *testing.T) {
+	pubKey := &rsa.PublicKey{N: big.NewInt(2), E: 2}
+	ps := Key{
+		module:     &mockCtx{},
+		tokenLabel: "token label",
+		pin:        "unused",
+		publicKey:  pubKey,
+	}
+	err := ps.setup(pubKey)
+	expectedText := "no matching public key found"
+	if err == nil {
+		t.Errorf("Expected error looking up nonexistent key")
+	} else if !strings.Contains(err.Error(), expectedText) {
+		t.Errorf("Expected error to contain %q, got %q", expectedText, err)
+	}
+}
+
 func TestSign(t *testing.T) {
 	ps := setup(t, rsaKey)
 	sig := sign(t, ps)
@@ -247,7 +265,7 @@ func TestSign(t *testing.T) {
 	// Check public key is of right type
 	_, ok := pub.(*rsa.PublicKey)
 	if !ok {
-		t.Errorf("Attempted to load RSA key from module, got key of type %s. Expected *rsa.PublicKey", reflect.TypeOf(pub))
+		t.Errorf("Attempted to get RSA key from Key, got key of type %s. Expected *rsa.PublicKey", reflect.TypeOf(pub))
 	}
 
 	ps = setup(t, ecKey)
