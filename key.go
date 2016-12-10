@@ -165,7 +165,7 @@ func New(modulePath, tokenLabel, pin string, publicKey crypto.PublicKey) (ps *Ke
 		publicKey:  publicKey,
 	}
 
-	err = ps.setup(publicKey)
+	err = ps.setup()
 	if err != nil {
 		return
 	}
@@ -224,21 +224,21 @@ func (ps *Key) getPublicKeyID(publicKey crypto.PublicKey) ([]byte, error) {
 	return nil, fmt.Errorf("no matching public key found in PKCS#11 token")
 }
 
-func (ps *Key) setup(publicKey crypto.PublicKey) (err error) {
+func (ps *Key) setup() error {
 	// Open a session
 	ps.sessionMu.Lock()
 	defer ps.sessionMu.Unlock()
 	session, err := ps.openSession()
 	if err != nil {
-		return
+		return err
 	}
 
 	ps.session = &session
 
-	publicKeyID, err := ps.getPublicKeyID(publicKey)
+	publicKeyID, err := ps.getPublicKeyID(ps.publicKey)
 	if err != nil {
 		ps.module.CloseSession(session)
-		return
+		return fmt.Errorf("looking up public key: %s", err)
 	}
 
 	// Fetch the private key by matching its id to the public key handle.
@@ -248,30 +248,25 @@ func (ps *Key) setup(publicKey crypto.PublicKey) (err error) {
 		return fmt.Errorf("getting private key: %s", err)
 	}
 	ps.privateKeyHandle = privateKeyHandle
-	return
+	return nil
 }
 
+// getPrivateKey gets a handle to the private key whose CKA_ID matches the
+// provided publicKeyID. It must be called with the ps.sessionMu lock held.
 func (ps *Key) getPrivateKey(module ctx, session pkcs11.SessionHandle, publicKeyID []byte) (pkcs11.ObjectHandle, error) {
 	var noHandle pkcs11.ObjectHandle
-	template := []*pkcs11.Attribute{
+	handles, err := ps.findObjects([]*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PRIVATE_KEY),
 		pkcs11.NewAttribute(pkcs11.CKA_ID, publicKeyID),
-	}
-	if err := module.FindObjectsInit(session, template); err != nil {
-		return noHandle, err
-	}
-	objs, _, err := module.FindObjects(session, 1)
+	})
 	if err != nil {
 		return noHandle, err
 	}
-	if err = module.FindObjectsFinal(session); err != nil {
-		return noHandle, err
-	}
 
-	if len(objs) == 0 {
+	if len(handles) == 0 {
 		return noHandle, fmt.Errorf("private key not found")
 	}
-	privateKeyHandle := objs[0]
+	privateKeyHandle := handles[0]
 
 	// Check whether the key has the CKA_ALWAYS_AUTHENTICATE attribute.
 	// If so, fail: we don't want to have to re-authenticate for each sign

@@ -18,7 +18,7 @@ var module = flag.String("module", "", "Path to PKCS11 module")
 var tokenLabel = flag.String("tokenLabel", "", "Token label")
 var pin = flag.String("pin", "", "PIN")
 var privateKeyLabel = flag.String("privateKeyLabel", "", "Private key label")
-var cert = flag.String("cert", "", "Certificate to sign with")
+var cert = flag.String("cert", "", "Certificate to sign with (PEM)")
 var sessionCount = flag.Int("sessions", runtime.GOMAXPROCS(-1), `Number of PKCS#11 sessions to use.
 For SoftHSM, GOMAXPROCS is appropriate, but for an external HSM the optimum session count depends on the HSM's parallelism.`)
 
@@ -26,7 +26,7 @@ func readCert(certContents []byte) (*x509.Certificate, error) {
 	block, _ := pem.Decode(certContents)
 	if block == nil {
 		return nil, fmt.Errorf("no PEM found")
-	} else if block.Type != "CERTIFICATE" && block.Type != "CERTIFICATE" {
+	} else if block.Type != "CERTIFICATE" {
 		return nil, fmt.Errorf("incorrect PEM type %s", block.Type)
 	}
 	return x509.ParseCertificate(block.Bytes)

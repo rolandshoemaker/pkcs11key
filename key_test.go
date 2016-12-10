@@ -194,7 +194,7 @@ func setup(t *testing.T, pubKey crypto.PublicKey) *Key {
 		pin:        "unused",
 		publicKey:  pubKey,
 	}
-	err := ps.setup(pubKey)
+	err := ps.setup()
 	if err != nil {
 		t.Fatalf("Failed to set up Key of type %T: %s", pubKey, err)
 	}
@@ -241,7 +241,7 @@ func TestInitializeKeyNotFound(t *testing.T) {
 		pin:        "unused",
 		publicKey:  pubKey,
 	}
-	err := ps.setup(pubKey)
+	err := ps.setup()
 	expectedText := "no matching public key found"
 	if err == nil {
 		t.Errorf("Expected error looking up nonexistent key")
@@ -296,8 +296,9 @@ func TestAttributeTypeInvalid(t *testing.T) {
 		module:     &mockCtxFailsAlwaysAuthenticate{},
 		tokenLabel: "token label",
 		pin:        "unused",
+		publicKey:  rsaKey,
 	}
-	err := ps.setup(rsaKey)
+	err := ps.setup()
 	if err != nil {
 		t.Errorf("Failed to set up with a token that returns CKR_ATTRIBUTE_TYPE_INVALID: %s", err)
 	}
