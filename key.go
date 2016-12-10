@@ -208,20 +208,22 @@ func (ps *Key) getPublicKeyID(publicKey crypto.PublicKey) ([]byte, error) {
 	})
 	if err != nil {
 		return nil, err
+	} else if len(publicKeyHandles) == 0 {
+		return nil, fmt.Errorf("no matching public key found in PKCS#11 token")
+	} else if len(publicKeyHandles) > 1 {
+		return nil, fmt.Errorf("too many matching public keys found in PKCS#11 token")
 	}
 
-	for _, publicKeyHandle := range publicKeyHandles {
-		attrs, err := ps.module.GetAttributeValue(*ps.session, publicKeyHandle, []*pkcs11.Attribute{
-			pkcs11.NewAttribute(pkcs11.CKA_ID, nil),
-		})
-		if err != nil {
-			return nil, err
-		}
-		if len(attrs) > 0 && attrs[0].Type == pkcs11.CKA_ID {
-			return attrs[0].Value, nil
-		}
+	attrs, err := ps.module.GetAttributeValue(*ps.session, publicKeyHandles[0], []*pkcs11.Attribute{
+		pkcs11.NewAttribute(pkcs11.CKA_ID, nil),
+	})
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("no matching public key found in PKCS#11 token")
+	if len(attrs) > 0 && attrs[0].Type == pkcs11.CKA_ID {
+		return attrs[0].Value, nil
+	}
+	return nil, fmt.Errorf("invalid result from GetAttributeValue")
 }
 
 func (ps *Key) setup() error {
